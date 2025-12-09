@@ -31,7 +31,6 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     time: 0
   });
 
-  // Initialize grid
   useEffect(() => {
     initializeGrid();
   }, [gridSize]);
@@ -42,6 +41,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
       const gridRow: Cell[] = [];
       for (let col = 0; col < gridSize; col++) {
         let type: CellType = 'empty';
+        if (grid[row]?.[col]?.type === 'wall') type = 'empty';
         if (row === startPos.row && col === startPos.col) type = 'start';
         else if (row === endPos.row && col === endPos.col) type = 'end';
         gridRow.push({ row, col, type });
@@ -54,14 +54,13 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
 
   const handleCellClick = (row: number, col: number) => {
     if (isRunning) return;
-    
-    const newGrid = [...grid];
-    const cell = newGrid[row][col];
-    
+    const cell = grid[row][col];
     if (cell.type === 'start' || cell.type === 'end') return;
-    
-    cell.type = cell.type === 'wall' ? 'empty' : 'wall';
-    setGrid(newGrid);
+    setGrid(prevGrid => {
+      const newGrid = prevGrid.map(r => [...r]);
+      newGrid[row][col] = { ...cell, type: cell.type === 'wall' ? 'empty' : 'wall' };
+      return newGrid;
+    });
   };
 
   const handleMouseDown = (row: number, col: number) => {
@@ -70,13 +69,11 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
   };
 
   const handleMouseEnter = (row: number, col: number) => {
-    if (!isDrawing || isRunning) return;
+    if (!isDrawing) return;
     handleCellClick(row, col);
   };
 
-  const handleMouseUp = () => {
-    setIsDrawing(false);
-  };
+  const handleMouseUp = () => setIsDrawing(false);
 
   const generateMaze = () => {
     const newGrid: Cell[][] = [];
@@ -84,15 +81,11 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
       const gridRow: Cell[] = [];
       for (let col = 0; col < gridSize; col++) {
         let type: CellType = 'empty';
-        
-        // Add random walls (30% chance)
         if (Math.random() < 0.3 && !(row === startPos.row && col === startPos.col) && !(row === endPos.row && col === endPos.col)) {
           type = 'wall';
         }
-        
         if (row === startPos.row && col === startPos.col) type = 'start';
         else if (row === endPos.row && col === endPos.col) type = 'end';
-        
         gridRow.push({ row, col, type });
       }
       newGrid.push(gridRow);
@@ -109,269 +102,212 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   const getNeighbors = (row: number, col: number): [number, number][] => {
-    const neighbors: [number, number][] = [];
-    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-    
-    for (const [dr, dc] of directions) {
-      const newRow = row + dr;
-      const newCol = col + dc;
-      if (newRow >= 0 && newRow < gridSize && newCol >= 0 && newCol < gridSize) {
-        neighbors.push([newRow, newCol]);
-      }
-    }
-    return neighbors;
-  };
+  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+  return dirs
+    .map(([dr, dc]) => [row + dr, col + dc] as [number, number])
+    .filter(([r, c]) => r >= 0 && r < gridSize && c >= 0 && c < gridSize);
+};
 
-  const reconstructPath = (cameFrom: Map<string, string>, current: string): string[] => {
+
+  const reconstructPath = (cameFrom: Map<string,string>, current: string) => {
     const path: string[] = [current];
-    while (cameFrom.has(current)) {
+    while(cameFrom.has(current)){
       current = cameFrom.get(current)!;
       path.unshift(current);
     }
     return path;
   };
 
+  const clearVisualization = () => {
+    setGrid(prevGrid => prevGrid.map(row => row.map(cell => 
+      (cell.type==='explored'||cell.type==='path'||cell.type==='current') ? {...cell,type:'empty'} : cell
+    )));
+    setStats({status:'Ready',nodesVisited:0,pathLength:0,time:0});
+  };
+
+  const visualizePath = async (pathKeys: string[]) => {
+    for(const key of pathKeys){
+      const [row,col] = key.split(',').map(Number);
+      if((row!==startPos.row||col!==startPos.col)&&(row!==endPos.row||col!==endPos.col)){
+        setGrid(prevGrid=>{
+          const newGrid = prevGrid.map(r=>[...r]);
+          newGrid[row][col] = {...newGrid[row][col], type:'path'};
+          return newGrid;
+        });
+        await sleep(speed/2);
+      }
+    }
+  };
+
   const bfs = async () => {
     const startTime = Date.now();
-    const queue: [number, number][] = [[startPos.row, startPos.col]];
-    const visited = new Set<string>();
-    const cameFrom = new Map<string, string>();
-    visited.add(`${startPos.row},${startPos.col}`);
-    
+    const queue: [number,number][] = [[startPos.row,startPos.col]];
+    const visited = new Set<string>([`${
+      startPos.row},${startPos.col}`]);
+    const cameFrom = new Map<string,string>();
     let nodesVisited = 0;
 
-    while (queue.length > 0 && !isPaused) {
-      const [row, col] = queue.shift()!;
+    while(queue.length>0 && !isPaused){
+      const [row,col] = queue.shift()!;
       nodesVisited++;
 
-      if (row === endPos.row && col === endPos.col) {
-        // Found the end!
-        const pathKeys = reconstructPath(cameFrom, `${row},${col}`);
+      if(row===endPos.row && col===endPos.col){
+        const pathKeys = reconstructPath(cameFrom,`${row},${col}`);
         await visualizePath(pathKeys);
-        const time = Date.now() - startTime;
-        setStats({ status: 'Complete', nodesVisited, pathLength: pathKeys.length, time });
-        
-        if (onResultsUpdate) {
-          onResultsUpdate({
-            algorithm: 'BFS',
-            pathLength: pathKeys.length,
-            time,
-            visited: nodesVisited
-          });
-        }
+        const time = Date.now()-startTime;
+        setStats({status:'Complete',nodesVisited,pathLength:pathKeys.length,time});
+        onResultsUpdate?.({algorithm:'BFS',pathLength:pathKeys.length,time,visited:nodesVisited});
         return;
       }
 
-      const neighbors = getNeighbors(row, col);
-      for (const [nRow, nCol] of neighbors) {
+      for(const [nRow,nCol] of getNeighbors(row,col)){
         const key = `${nRow},${nCol}`;
-        if (!visited.has(key) && grid[nRow][nCol].type !== 'wall') {
+        if(!visited.has(key) && grid[nRow][nCol].type!=='wall'){
           visited.add(key);
-          queue.push([nRow, nCol]);
-          cameFrom.set(key, `${row},${col}`);
-          
-          if (showExplored && !(nRow === endPos.row && nCol === endPos.col)) {
-            const newGrid = [...grid];
-            newGrid[nRow][nCol] = { ...newGrid[nRow][nCol], type: 'explored' };
-            setGrid(newGrid);
+          queue.push([nRow,nCol]);
+          cameFrom.set(key,`${row},${col}`);
+
+          if(showExplored && !(nRow===endPos.row && nCol===endPos.col)){
+            setGrid(prevGrid=>{
+              const newGrid = prevGrid.map(r=>[...r]);
+              newGrid[nRow][nCol] = {...newGrid[nRow][nCol],type:'explored'};
+              return newGrid;
+            });
             await sleep(speed);
           }
         }
       }
-
-      setStats(prev => ({ ...prev, nodesVisited, status: 'Running...' }));
+      setStats(prev=>({...prev,nodesVisited,status:'Running...'}));
     }
-
-    setStats(prev => ({ ...prev, status: 'No path found' }));
+    setStats(prev=>({...prev,status:'No path found'}));
   };
 
   const dfs = async () => {
     const startTime = Date.now();
-    const stack: [number, number][] = [[startPos.row, startPos.col]];
+    const stack: [number,number][] = [[startPos.row,startPos.col]];
     const visited = new Set<string>();
-    const cameFrom = new Map<string, string>();
-    
+    const cameFrom = new Map<string,string>();
     let nodesVisited = 0;
 
-    while (stack.length > 0 && !isPaused) {
-      const [row, col] = stack.pop()!;
+    while(stack.length>0 && !isPaused){
+      const [row,col] = stack.pop()!;
       const key = `${row},${col}`;
-      
-      if (visited.has(key)) continue;
+      if(visited.has(key)) continue;
       visited.add(key);
       nodesVisited++;
 
-      if (row === endPos.row && col === endPos.col) {
-        const pathKeys = reconstructPath(cameFrom, `${row},${col}`);
+      if(row===endPos.row && col===endPos.col){
+        const pathKeys = reconstructPath(cameFrom,key);
         await visualizePath(pathKeys);
-        const time = Date.now() - startTime;
-        setStats({ status: 'Complete', nodesVisited, pathLength: pathKeys.length, time });
-        
-        if (onResultsUpdate) {
-          onResultsUpdate({
-            algorithm: 'DFS',
-            pathLength: pathKeys.length,
-            time,
-            visited: nodesVisited
-          });
-        }
+        const time = Date.now()-startTime;
+        setStats({status:'Complete',nodesVisited,pathLength:pathKeys.length,time});
+        onResultsUpdate?.({algorithm:'DFS',pathLength:pathKeys.length,time,visited:nodesVisited});
         return;
       }
 
-      if (showExplored && !(row === endPos.row && col === endPos.col) && !(row === startPos.row && col === startPos.col)) {
-        const newGrid = [...grid];
-        newGrid[row][col] = { ...newGrid[row][col], type: 'explored' };
-        setGrid(newGrid);
+      if(showExplored && key!==`${startPos.row},${startPos.col}` && key!==`${endPos.row},${endPos.col}`){
+        setGrid(prevGrid=>{
+          const newGrid = prevGrid.map(r=>[...r]);
+          newGrid[row][col] = {...newGrid[row][col],type:'explored'};
+          return newGrid;
+        });
         await sleep(speed);
       }
 
-      const neighbors = getNeighbors(row, col);
-      for (const [nRow, nCol] of neighbors) {
+      for(const [nRow,nCol] of getNeighbors(row,col)){
         const nKey = `${nRow},${nCol}`;
-        if (!visited.has(nKey) && grid[nRow][nCol].type !== 'wall') {
-          cameFrom.set(nKey, key);
-          stack.push([nRow, nCol]);
+        if(!visited.has(nKey) && grid[nRow][nCol].type!=='wall'){
+          cameFrom.set(nKey,key);
+          stack.push([nRow,nCol]);
         }
       }
-
-      setStats(prev => ({ ...prev, nodesVisited, status: 'Running...' }));
+      setStats(prev=>({...prev,nodesVisited,status:'Running...'}));
     }
-
-    setStats(prev => ({ ...prev, status: 'No path found' }));
+    setStats(prev=>({...prev,status:'No path found'}));
   };
 
-  const heuristic = (row: number, col: number): number => {
-    return Math.abs(row - endPos.row) + Math.abs(col - endPos.col);
-  };
+  const heuristic = (row:number,col:number)=>Math.abs(row-endPos.row)+Math.abs(col-endPos.col);
 
   const aStar = async () => {
-  const startTime = Date.now();
-  const startKey = `${startPos.row},${startPos.col}`;
-  const endKey = `${endPos.row},${endPos.col}`;
+    const startTime = Date.now();
+    const startKey = `${startPos.row},${startPos.col}`;
+    const endKey = `${endPos.row},${endPos.col}`;
+    const walkable = grid.map(r=>r.map(c=>c.type!=='wall'));
+    const gScore = new Map<string,number>();
+    const fScore = new Map<string,number>();
+    const cameFrom = new Map<string,string>();
+    const openSet = new Set<string>([startKey]);
+    const closedSet = new Set<string>();
+    gScore.set(startKey,0);
+    fScore.set(startKey,heuristic(startPos.row,startPos.col));
+    let nodesVisited=0;
 
-  // FIX: copy of the grid to avoid stale state
-  const walkable = grid.map(row => row.map(cell => cell.type !== "wall"));
-
-  const gScore = new Map<string, number>();
-  const fScore = new Map<string, number>();
-  const cameFrom = new Map<string, string>();
-
-  const openSet = new Set<string>([startKey]);
-  const closedSet = new Set<string>();
-
-  gScore.set(startKey, 0);
-  fScore.set(startKey, heuristic(startPos.row, startPos.col));
-
-  let nodesVisited = 0;
-
-  while (openSet.size > 0 && !isPaused) {
-    let current = "";
-    let lowest = Infinity;
-
-    for (const node of openSet) {
-      const f = fScore.get(node) ?? Infinity;
-      if (f < lowest) {
-        lowest = f;
-        current = node;
+    while(openSet.size>0 && !isPaused){
+      let current='',lowest=Infinity;
+      for(const node of openSet){
+        const f=fScore.get(node)??Infinity;
+        if(f<lowest){lowest=f;current=node;}
       }
-    }
-
-    const [row, col] = current.split(",").map(Number);
-    nodesVisited++;
-
-    if (current === endKey) {
-      const path = reconstructPath(cameFrom, current);
-      await visualizePath(path);
-      const time = Date.now() - startTime;
-
-      setStats({ status: "Complete", nodesVisited, pathLength: path.length, time });
-      onResultsUpdate?.({ algorithm: "A*", pathLength: path.length, time, visited: nodesVisited });
-
-      return;
-    }
-
-    openSet.delete(current);
-    closedSet.add(current);
-
-    if (showExplored && current !== startKey && current !== endKey) {
-      const newGrid = [...grid];
-      newGrid[row][col] = { ...newGrid[row][col], type: "explored" };
-      setGrid(newGrid);
-      await sleep(speed);
-    }
-
-    const neighbors = getNeighbors(row, col);
-    const currentG = gScore.get(current) ?? Infinity;
-
-    for (const [nr, nc] of neighbors) {
-      const key = `${nr},${nc}`;
-
-      if (!walkable[nr][nc] || closedSet.has(key)) continue;
-
-      const tentativeG = currentG + 1;
-
-      if (tentativeG < (gScore.get(key) ?? Infinity)) {
-        cameFrom.set(key, current);
-        gScore.set(key, tentativeG);
-        fScore.set(key, tentativeG + heuristic(nr, nc));
-        openSet.add(key);
+      const [row,col] = current.split(',').map(Number);
+      nodesVisited++;
+      if(current===endKey){
+        const path = reconstructPath(cameFrom,current);
+        await visualizePath(path);
+        const time = Date.now()-startTime;
+        setStats({status:'Complete',nodesVisited,pathLength:path.length,time});
+        onResultsUpdate?.({algorithm:'A*',pathLength:path.length,time,visited:nodesVisited});
+        return;
       }
-    }
+      openSet.delete(current);
+      closedSet.add(current);
 
-    setStats(prev => ({ ...prev, nodesVisited, status: "Running..." }));
-  }
-
-  setStats(prev => ({ ...prev, status: "No path found" }));
-};
-
-
-  const visualizePath = async (pathKeys: string[]) => {
-    for (const key of pathKeys) {
-      const [row, col] = key.split(',').map(Number);
-      if (!(row === startPos.row && col === startPos.col) && !(row === endPos.row && col === endPos.col)) {
-        const newGrid = [...grid];
-        newGrid[row][col] = { ...newGrid[row][col], type: 'path' };
-        setGrid(newGrid);
-        await sleep(speed / 2);
+      if(showExplored && current!==startKey && current!==endKey){
+        setGrid(prevGrid=>{
+          const newGrid = prevGrid.map(r=>[...r]);
+          newGrid[row][col] = {...newGrid[row][col],type:'explored'};
+          return newGrid;
+        });
+        await sleep(speed);
       }
+
+      const currentG = gScore.get(current)??Infinity;
+      for(const [nr,nc] of getNeighbors(row,col)){
+        const key = `${nr},${nc}`;
+        if(!walkable[nr][nc] || closedSet.has(key)) continue;
+        const tentativeG = currentG+1;
+        if(tentativeG < (gScore.get(key)??Infinity)){
+          cameFrom.set(key,current);
+          gScore.set(key,tentativeG);
+          fScore.set(key,tentativeG+heuristic(nr,nc));
+          openSet.add(key);
+        }
+      }
+      setStats(prev=>({...prev,nodesVisited,status:'Running...'}));
     }
+    setStats(prev=>({...prev,status:'No path found'}));
   };
 
   const startSearch = async () => {
-    if (isRunning) return;
-    
+    if(isRunning) return;
     setIsRunning(true);
     setIsPaused(false);
-    initializeGrid(); // Clear previous search
+    clearVisualization();
     await sleep(100);
-
-    if (algorithm === 'BFS') {
-      await bfs();
-    } else if (algorithm === 'DFS') {
-      await dfs();
-    } else if (algorithm === 'A*') {
-      await aStar();
-    }
-
+    if(algorithm==='BFS') await bfs();
+    else if(algorithm==='DFS') await dfs();
+    else if(algorithm==='A*') await aStar();
     setIsRunning(false);
   };
 
-  const getCellColor = (cell: Cell) => {
-    switch (cell.type) {
-      case 'start':
-        return 'bg-gradient-to-br from-green-400 to-green-500 shadow-lg';
-      case 'end':
-        return 'bg-gradient-to-br from-red-400 to-red-500 shadow-lg';
-      case 'wall':
-        return 'bg-slate-800';
-      case 'explored':
-        return 'bg-blue-300 animate-pulse';
-      case 'path':
-        return 'bg-yellow-400 shadow-md';
-      case 'current':
-        return 'bg-purple-500 animate-pulse';
-      default:
-        return 'bg-white border border-slate-200 hover:bg-slate-100';
+  const getCellColor = (cell:Cell)=>{
+    switch(cell.type){
+      case 'start': return 'bg-gradient-to-br from-green-400 to-green-500 shadow-lg';
+      case 'end': return 'bg-gradient-to-br from-red-400 to-red-500 shadow-lg';
+      case 'wall': return 'bg-slate-800';
+      case 'explored': return 'bg-blue-300 animate-pulse';
+      case 'path': return 'bg-yellow-400 shadow-md';
+      case 'current': return 'bg-purple-500 animate-pulse';
+      default: return 'bg-white border border-slate-200 hover:bg-slate-100';
     }
   };
 
@@ -454,6 +390,8 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
                 disabled={isRunning}
                 className="w-full px-4 py-3 rounded-xl bg-slate-100 text-slate-700 border border-slate-200"
               >
+                
+                <option value={5}>5 x 5</option>
                 <option value={10}>10 x 10</option>
                 <option value={15}>15 x 15</option>
                 <option value={20}>20 x 20</option>
