@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } from "react"; 
 import { Play, RotateCcw, Grid3x3, Zap, Pause } from "lucide-react";
 
+// Types possibles pour une cellule du labyrinthe
 type CellType = 'empty' | 'wall' | 'start' | 'end' | 'explored' | 'path' | 'current';
 
+// Structure représentant une cellule
 interface Cell {
   row: number;
   col: number;
@@ -13,17 +15,18 @@ interface MazePanelProps {
   onResultsUpdate?: (results: any) => void;
 }
 
+// Composant principal du visualiseur de labyrinthe
 export function MazePanel({ onResultsUpdate }: MazePanelProps) {
-  const [gridSize, setGridSize] = useState(20);
-  const [algorithm, setAlgorithm] = useState("BFS");
-  const [speed, setSpeed] = useState(50);
-  const [showExplored, setShowExplored] = useState(true);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [grid, setGrid] = useState<Cell[][]>([]);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [startPos, setStartPos] = useState({ row: 1, col: 1 });
-  const [endPos, setEndPos] = useState({ row: gridSize - 2, col: gridSize - 2 });
+  const [gridSize, setGridSize] = useState(20); // Taille du labyrinthe
+  const [algorithm, setAlgorithm] = useState("BFS"); // Algorithme sélectionné
+  const [speed, setSpeed] = useState(50); // Vitesse d'affichage
+  const [showExplored, setShowExplored] = useState(true); // Afficher les cases explorées
+  const [isRunning, setIsRunning] = useState(false); // Algorithme en cours ?
+  const [isPaused, setIsPaused] = useState(false); // Algorithme en pause ?
+  const [grid, setGrid] = useState<Cell[][]>([]); // Grille complète
+  const [isDrawing, setIsDrawing] = useState(false); // Mode dessin (souris)
+  const [startPos, setStartPos] = useState({ row: 1, col: 1 }); // Position début
+  const [endPos, setEndPos] = useState({ row: gridSize - 2, col: gridSize - 2 }); // Position fin
   const [stats, setStats] = useState({
     status: 'Ready',
     nodesVisited: 0,
@@ -31,10 +34,12 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     time: 0
   });
 
+  // Recrée la grille à chaque changement de taille
   useEffect(() => {
     initializeGrid();
   }, [gridSize]);
 
+  // Initialise la grille vide avec start/end
   const initializeGrid = () => {
     const newGrid: Cell[][] = [];
     for (let row = 0; row < gridSize; row++) {
@@ -52,6 +57,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     setStats({ status: 'Ready', nodesVisited: 0, pathLength: 0, time: 0 });
   };
 
+  // Clique : ajout/suppression de mur
   const handleCellClick = (row: number, col: number) => {
     if (isRunning) return;
     const cell = grid[row][col];
@@ -75,6 +81,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
 
   const handleMouseUp = () => setIsDrawing(false);
 
+  // Génère un labyrinthe aléatoire avec 30% de murs
   const generateMaze = () => {
     const newGrid: Cell[][] = [];
     for (let row = 0; row < gridSize; row++) {
@@ -93,22 +100,25 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     setGrid(newGrid);
   };
 
+  // Réinitialise tout
   const reset = () => {
     setIsRunning(false);
     setIsPaused(false);
     initializeGrid();
   };
 
+  // Petite pause (vitesse animation)
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+  // Retourne les voisins d'une cellule
   const getNeighbors = (row: number, col: number): [number, number][] => {
-  const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
-  return dirs
-    .map(([dr, dc]) => [row + dr, col + dc] as [number, number])
-    .filter(([r, c]) => r >= 0 && r < gridSize && c >= 0 && c < gridSize);
-};
+    const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    return dirs
+      .map(([dr, dc]) => [row + dr, col + dc] as [number, number])
+      .filter(([r, c]) => r >= 0 && r < gridSize && c >= 0 && c < gridSize);
+  };
 
-
+  // Reconstruit le chemin final
   const reconstructPath = (cameFrom: Map<string,string>, current: string) => {
     const path: string[] = [current];
     while(cameFrom.has(current)){
@@ -118,6 +128,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     return path;
   };
 
+  // Efface la visualisation précédente
   const clearVisualization = () => {
     setGrid(prevGrid => prevGrid.map(row => row.map(cell => 
       (cell.type==='explored'||cell.type==='path'||cell.type==='current') ? {...cell,type:'empty'} : cell
@@ -125,6 +136,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     setStats({status:'Ready',nodesVisited:0,pathLength:0,time:0});
   };
 
+  // Affiche le chemin final
   const visualizePath = async (pathKeys: string[]) => {
     for(const key of pathKeys){
       const [row,col] = key.split(',').map(Number);
@@ -139,6 +151,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     }
   };
 
+  // -------- BFS -------- //
   const bfs = async () => {
     const startTime = Date.now();
     const queue: [number,number][] = [[startPos.row,startPos.col]];
@@ -151,6 +164,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
       const [row,col] = queue.shift()!;
       nodesVisited++;
 
+      // Arrivé à la fin
       if(row===endPos.row && col===endPos.col){
         const pathKeys = reconstructPath(cameFrom,`${row},${col}`);
         await visualizePath(pathKeys);
@@ -160,6 +174,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
         return;
       }
 
+      // Ajout des voisins
       for(const [nRow,nCol] of getNeighbors(row,col)){
         const key = `${nRow},${nCol}`;
         if(!visited.has(key) && grid[nRow][nCol].type!=='wall'){
@@ -182,6 +197,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     setStats(prev=>({...prev,status:'No path found'}));
   };
 
+  // -------- DFS -------- //
   const dfs = async () => {
     const startTime = Date.now();
     const stack: [number,number][] = [[startPos.row,startPos.col]];
@@ -226,8 +242,10 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     setStats(prev=>({...prev,status:'No path found'}));
   };
 
+  // Heuristique de Manhattan pour A*
   const heuristic = (row:number,col:number)=>Math.abs(row-endPos.row)+Math.abs(col-endPos.col);
 
+  // -------- A* -------- //
   const aStar = async () => {
     const startTime = Date.now();
     const startKey = `${startPos.row},${startPos.col}`;
@@ -250,6 +268,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
       }
       const [row,col] = current.split(',').map(Number);
       nodesVisited++;
+
       if(current===endKey){
         const path = reconstructPath(cameFrom,current);
         await visualizePath(path);
@@ -258,6 +277,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
         onResultsUpdate?.({algorithm:'A*',pathLength:path.length,time,visited:nodesVisited});
         return;
       }
+
       openSet.delete(current);
       closedSet.add(current);
 
@@ -287,6 +307,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     setStats(prev=>({...prev,status:'No path found'}));
   };
 
+  // Lance l’algorithme sélectionné
   const startSearch = async () => {
     if(isRunning) return;
     setIsRunning(true);
@@ -299,6 +320,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
     setIsRunning(false);
   };
 
+  // Couleurs des cellules selon leur état
   const getCellColor = (cell:Cell)=>{
     switch(cell.type){
       case 'start': return 'bg-gradient-to-br from-green-400 to-green-500 shadow-lg';
@@ -313,6 +335,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
 
   return (
     <div id="maze-visualizer" className="max-w-7xl mx-auto px-8 py-16">
+      {/* TITRE */}
       <div className="text-center mb-12">
         <h2 className="gradient-text mb-4">Interactive Maze Visualizer</h2>
         <p className="text-lg text-slate-600">
@@ -320,11 +343,15 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
         </p>
       </div>
 
+      {/* CONTENU PRINCIPAL */}
       <div className="bg-white rounded-3xl shadow-2xl p-8 border border-slate-200">
         <div className="grid grid-cols-[1fr_320px] gap-8">
-          {/* Maze Grid */}
+
+          {/* ----- ZONE LABYRINTHE ----- */}
           <div className="space-y-4">
             <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl p-8 border-2 border-slate-200">
+
+              {/* GRILLE ----------------------------- */}
               <div 
                 className="grid gap-1 mx-auto"
                 style={{
@@ -350,6 +377,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
               </div>
             </div>
 
+            {/* LEGENDE */}
             <div className="flex items-center justify-between text-sm">
               <div className="flex gap-4">
                 <div className="flex items-center gap-2">
@@ -377,8 +405,10 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
             </div>
           </div>
 
-          {/* Control Panel */}
+          {/* ----- PANNEAU DE CONTROLE ----- */}
           <div className="space-y-6">
+
+            {/* Taille grille */}
             <div className="space-y-3">
               <label className="block text-sm text-slate-600">Grid Size</label>
               <select
@@ -390,7 +420,6 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
                 disabled={isRunning}
                 className="w-full px-4 py-3 rounded-xl bg-slate-100 text-slate-700 border border-slate-200"
               >
-                
                 <option value={5}>5 x 5</option>
                 <option value={10}>10 x 10</option>
                 <option value={15}>15 x 15</option>
@@ -400,6 +429,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
               </select>
             </div>
 
+            {/* Choix algorithme */}
             <div className="space-y-3">
               <label className="block text-sm text-slate-600">Algorithm</label>
               <div className="space-y-2">
@@ -422,6 +452,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
 
             <div className="h-px bg-slate-200"></div>
 
+            {/* Boutons actions */}
             <div className="space-y-3">
               <button 
                 onClick={generateMaze}
@@ -451,6 +482,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
 
             <div className="h-px bg-slate-200"></div>
 
+            {/* Vitesse */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-sm text-slate-600 flex items-center gap-2">
@@ -470,6 +502,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
               />
             </div>
 
+            {/* Checkbox afficher exploré */}
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -481,6 +514,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
               <span className="text-sm text-slate-700">Show explored nodes</span>
             </label>
 
+            {/* Statistiques */}
             <div className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl p-4 border border-blue-200">
               <div className="text-xs text-slate-600 space-y-1">
                 <div className="flex justify-between">
@@ -501,6 +535,7 @@ export function MazePanel({ onResultsUpdate }: MazePanelProps) {
                 </div>
               </div>
             </div>
+
           </div>
         </div>
       </div>
